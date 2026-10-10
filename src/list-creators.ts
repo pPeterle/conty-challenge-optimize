@@ -20,13 +20,21 @@ type CampaignRow = { id: string; niches_json: string };
 type CountRow = { n: number };
 type PageRow = CreatorMatch & { total: number };
 
-// Nichos em comum entre o criador (c) e a campanha (?1). Conta pares iguais,
-// como o laço duplo da versão anterior.
-const NICHE_SCORE = `(
-  SELECT COUNT(*)
-  FROM json_each(c.niches_json) AS cn, json_each(?1) AS kn
-  WHERE cn.type = 'text' AND kn.type = 'text' AND cn.value = kn.value
-)`;
+// Nichos da campanha (?1) lidos uma vez, e o score de cada criador como a
+// quantidade de pares iguais entre os nichos dele e os da campanha, como o
+// laço duplo da versão anterior. Criador sem nicho em comum não entra.
+const MATCHED_CTES = `
+  campaign_niches AS MATERIALIZED (
+    SELECT value FROM json_each(?1) WHERE type = 'text'
+  ),
+  matched AS (
+    SELECT c.id, c.name, COUNT(*) AS niche_score
+    FROM creators AS c
+    JOIN json_each(c.niches_json) AS cn
+    JOIN campaign_niches AS kn ON kn.value = cn.value
+    WHERE cn.type = 'text'
+    GROUP BY c.id
+  )`;
 
 // Soma, por conta do criador, as views da métrica mais recente
 // (maior captured_at, empate pelo maior id). Conta sem métrica não soma.
@@ -43,16 +51,12 @@ const LATEST_REACH = `COALESCE((
 ), 0)`;
 
 const COUNT_SQL = `
-  SELECT COUNT(*) AS n
-  FROM creators AS c
-  WHERE ${NICHE_SCORE} > 0
+  WITH ${MATCHED_CTES}
+  SELECT COUNT(*) AS n FROM matched
 `;
 
 const PAGE_SQL = `
-  WITH matched AS (
-    SELECT c.id, c.name, ${NICHE_SCORE} AS niche_score
-    FROM creators AS c
-  ),
+  WITH ${MATCHED_CTES},
   ranked AS (
     SELECT
       m.id,
@@ -61,7 +65,6 @@ const PAGE_SQL = `
       ${LATEST_REACH} AS latest_reach,
       COUNT(*) OVER () AS total
     FROM matched AS m
-    WHERE m.niche_score > 0
     ORDER BY m.niche_score DESC, latest_reach DESC, m.id ASC
     LIMIT ?2 OFFSET ?3
   )

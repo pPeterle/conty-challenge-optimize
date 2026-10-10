@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
   delivered_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_social_accounts_creator ON social_accounts (creator_id);
-CREATE INDEX IF NOT EXISTS idx_metrics_account_latest ON metrics (account_id, captured_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_social_accounts_creator ON social_accounts (creator_id, id);
+CREATE INDEX IF NOT EXISTS idx_metrics_account_latest ON metrics (account_id, captured_at DESC, id DESC, views);
 CREATE INDEX IF NOT EXISTS idx_deliveries_creator_date ON deliveries (creator_id, delivered_at);
 `;
 
