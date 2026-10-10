@@ -14,8 +14,10 @@ type Creator = {
 type Page = { campaign_id: string; total: number; creators: Creator[] };
 
 const CAMPAIGN = "cmp_vol";
+const EMPTY_CAMPAIGN = "cmp_vazia";
 const CREATORS = 2500;
 const PAGE_SIZE = 20;
+const SWEEP_LIMITS = [7, 20, 50];
 
 function rng(seed: number): () => number {
   let state = seed;
@@ -48,6 +50,7 @@ function seedWithTies(db: DatabaseSync): void {
 
   db.exec("BEGIN");
   db.prepare("INSERT INTO campaigns VALUES (?, ?, ?)").run(CAMPAIGN, "Volume", JSON.stringify(["beleza", "moda"]));
+  db.prepare("INSERT INTO campaigns VALUES (?, ?, ?)").run(EMPTY_CAMPAIGN, "Sem nicho", "[]");
   for (let i = 0; i < CREATORS; i += 1) {
     const id = `crt_${String(Math.floor(rand() * 1e9)).padStart(9, "0")}_${i}`;
     insertCreator.run(id, `Criador ${i}`, JSON.stringify(niches.filter(() => rand() < 0.45)));
@@ -68,8 +71,8 @@ function seedWithTies(db: DatabaseSync): void {
 
 // Referência ingênua escrita a partir da regra do README, lendo as tabelas
 // direto (fora de src/db.ts, para não entrar na contagem de queries).
-function reference(db: DatabaseSync): Creator[] {
-  const campaign = db.prepare("SELECT niches_json FROM campaigns WHERE id = ?").get(CAMPAIGN) as {
+function reference(db: DatabaseSync, campaignId: string): Creator[] {
+  const campaign = db.prepare("SELECT niches_json FROM campaigns WHERE id = ?").get(campaignId) as {
     niches_json: string;
   };
   const campaignNiches = JSON.parse(campaign.niches_json) as string[];
@@ -134,17 +137,23 @@ function reference(db: DatabaseSync): Creator[] {
 describe("listagem em volume maior que o seed, com empates", () => {
   let app: ReturnType<typeof createApp>;
   let expected: Creator[];
+  let expectedEmpty: Creator[];
 
   beforeAll(() => {
     const db = openDatabase(":memory:");
     seedWithTies(db);
-    expected = reference(db);
+    expected = reference(db, CAMPAIGN);
+    expectedEmpty = reference(db, EMPTY_CAMPAIGN);
     app = createApp(db);
   });
 
-  async function page(offset: number, limit = PAGE_SIZE): Promise<{ body: Page; queries: number }> {
+  async function page(
+    offset: number,
+    limit = PAGE_SIZE,
+    campaignId = CAMPAIGN,
+  ): Promise<{ body: Page; queries: number }> {
     resetQueryCount();
-    const res = await app.request(`/campaigns/${CAMPAIGN}/creators?limit=${limit}&offset=${offset}`);
+    const res = await app.request(`/campaigns/${campaignId}/creators?limit=${limit}&offset=${offset}`);
     const queries = getQueryCount();
     expect(res.status).toBe(200);
     return { body: (await res.json()) as Page, queries };
@@ -155,13 +164,13 @@ describe("listagem em volume maior que o seed, com empates", () => {
     expect(new Set(keys).size).toBeLessThan(keys.length / 10);
   });
 
-  it("todas as páginas batem com a referência e o total não muda", async () => {
-    for (let offset = 0; offset < expected.length; offset += PAGE_SIZE) {
-      const { body } = await page(offset);
+  it.each(SWEEP_LIMITS)("todas as páginas de %i batem com a referência e o total não muda", async (limit) => {
+    for (let offset = 0; offset < expected.length; offset += limit) {
+      const { body } = await page(offset, limit);
       expect(body).toEqual({
         campaign_id: CAMPAIGN,
         total: expected.length,
-        creators: expected.slice(offset, offset + PAGE_SIZE),
+        creators: expected.slice(offset, offset + limit),
       });
     }
   });
@@ -184,5 +193,14 @@ describe("listagem em volume maior que o seed, com empates", () => {
   it("a página de 20 fica dentro do teto de queries com mais de 2000 criadores", async () => {
     const { queries } = await page(0);
     expect(queries).toBeLessThanOrEqual(8);
+  });
+
+  it("campanha sem nichos devolve lista vazia com total zero", async () => {
+    expect(expectedEmpty).toEqual([]);
+    for (const offset of [0, 20]) {
+      const { body, queries } = await page(offset, PAGE_SIZE, EMPTY_CAMPAIGN);
+      expect(body).toEqual({ campaign_id: EMPTY_CAMPAIGN, total: 0, creators: [] });
+      expect(queries).toBeLessThanOrEqual(8);
+    }
   });
 });
