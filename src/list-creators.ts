@@ -38,8 +38,11 @@ const MATCHED_CTES = `
 
 // Soma, por conta do criador, as views da métrica mais recente
 // (maior captured_at, empate pelo maior id). Conta sem métrica não soma.
-const LATEST_REACH = `COALESCE((
-  SELECT SUM((
+// TOTAL soma em ponto flutuante e devolve 0 sem linhas, então uma soma acima
+// de 2^53 não vira inteiro que o Node se recusa a ler. Abaixo disso o valor
+// é exato e sai no JSON sem casa decimal.
+const LATEST_REACH = `(
+  SELECT TOTAL((
     SELECT mt.views
     FROM metrics AS mt
     WHERE mt.account_id = sa.id
@@ -48,7 +51,7 @@ const LATEST_REACH = `COALESCE((
   ))
   FROM social_accounts AS sa
   WHERE sa.creator_id = m.id
-), 0)`;
+)`;
 
 const COUNT_SQL = `
   WITH ${MATCHED_CTES}
