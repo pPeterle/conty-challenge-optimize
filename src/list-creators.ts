@@ -29,8 +29,7 @@ const NICHE_SCORE = `(
 
 // Soma, por conta do criador, as views da métrica mais recente
 // (maior captured_at, empate pelo maior id). Conta sem métrica não soma.
-function latestReach(creatorId: string): string {
-  return `COALESCE((
+const LATEST_REACH = `COALESCE((
   SELECT SUM((
     SELECT mt.views
     FROM metrics AS mt
@@ -39,9 +38,8 @@ function latestReach(creatorId: string): string {
     LIMIT 1
   ))
   FROM social_accounts AS sa
-  WHERE sa.creator_id = ${creatorId}
+  WHERE sa.creator_id = m.id
 ), 0)`;
-}
 
 const COUNT_SQL = `
   SELECT COUNT(*) AS n
@@ -55,7 +53,7 @@ const PAGE_SQL = `
     FROM creators AS c
   ),
   ranked AS (
-    SELECT m.id, m.name, m.niche_score, ${latestReach("m.id")} AS latest_reach
+    SELECT m.id, m.name, m.niche_score, ${LATEST_REACH} AS latest_reach
     FROM matched AS m
     WHERE m.niche_score > 0
     ORDER BY m.niche_score DESC, latest_reach DESC, m.id ASC
