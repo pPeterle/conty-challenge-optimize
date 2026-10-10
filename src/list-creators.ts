@@ -18,6 +18,7 @@ export type CreatorPage = {
 
 type CampaignRow = { id: string; niches_json: string };
 type CountRow = { n: number };
+type PageRow = CreatorMatch & { total: number };
 
 // Nichos em comum entre o criador (c) e a campanha (?1). Conta pares iguais,
 // como o laço duplo da versão anterior.
@@ -53,7 +54,12 @@ const PAGE_SQL = `
     FROM creators AS c
   ),
   ranked AS (
-    SELECT m.id, m.name, m.niche_score, ${LATEST_REACH} AS latest_reach
+    SELECT
+      m.id,
+      m.name,
+      m.niche_score,
+      ${LATEST_REACH} AS latest_reach,
+      COUNT(*) OVER () AS total
     FROM matched AS m
     WHERE m.niche_score > 0
     ORDER BY m.niche_score DESC, latest_reach DESC, m.id ASC
@@ -64,6 +70,7 @@ const PAGE_SQL = `
     r.name,
     r.niche_score,
     r.latest_reach,
+    r.total,
     (
       SELECT COUNT(*)
       FROM deliveries AS d
@@ -84,8 +91,7 @@ export async function listCreators(
   );
   if (!campaign) return null;
 
-  const total = await get<CountRow>(db, COUNT_SQL, campaign.niches_json);
-  const rows = await all<CreatorMatch>(
+  const rows = await all<PageRow>(
     db,
     PAGE_SQL,
     campaign.niches_json,
@@ -94,9 +100,16 @@ export async function listCreators(
     deliveriesSince(),
   );
 
+  // O total vem da janela na própria página. Só quando o offset passa do fim
+  // a página vem vazia e é preciso contar à parte.
+  const first = rows[0];
+  const total = first
+    ? first.total
+    : (await get<CountRow>(db, COUNT_SQL, campaign.niches_json))?.n;
+
   return {
     campaign_id: input.campaignId,
-    total: Number(total?.n ?? 0),
+    total: Number(total ?? 0),
     creators: rows.map((row) => ({
       id: row.id,
       name: row.name,
